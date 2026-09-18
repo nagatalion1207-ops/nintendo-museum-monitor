@@ -201,9 +201,7 @@ async function main() {
       // → 空き発生の可能性
       // --------------------------------------
 
-      const potentialAvailability =
-        day.sale_status !==
-        CONFIG.KNOWN_SOLD_OUT_STATUS;
+      const potentialAvailability = true;
 
 
       const previousSaleStatus =
