@@ -27,7 +27,15 @@ const CONFIG = {
   OPEN_STATUS: 1,
 
   STATE_FILE:
-    'state.json'
+    'state.json',
+
+  // 自動停止対象のWorkflowファイル名
+  WORKFLOW_FILE:
+    'monitor.yml',
+
+  // 日本時間
+  TIMEZONE:
+    'Asia/Tokyo'
 };
 
 
@@ -42,6 +50,39 @@ async function main() {
   );
 
 
+  // --------------------------------------------------------
+  // 監視期間終了チェック
+  //
+  // 最後のTARGET_DATEの翌日になったら
+  // Workflowを自動停止する
+  // --------------------------------------------------------
+
+  if (isMonitoringPeriodOver()) {
+
+    const latestDate =
+      getLatestTargetDate();
+
+    console.log(
+      `Monitoring period ended. ` +
+      `Latest target date: ${latestDate}`
+    );
+
+
+    await disableWorkflow();
+
+
+    console.log(
+      'Nintendo Museum monitor stopped automatically'
+    );
+
+    return;
+  }
+
+
+  // --------------------------------------------------------
+  // Discord Webhook
+  // --------------------------------------------------------
+
   const webhookUrl =
     process.env.DISCORD_WEBHOOK_URL;
 
@@ -54,9 +95,17 @@ async function main() {
   }
 
 
+  // --------------------------------------------------------
+  // 前回状態
+  // --------------------------------------------------------
+
   const state =
     loadState();
 
+
+  // --------------------------------------------------------
+  // Chromium起動
+  // --------------------------------------------------------
 
   const browser =
     await chromium.launch({
@@ -89,7 +138,7 @@ async function main() {
     );
 
 
-    // Cookie / JS初期化待ち
+    // Cookie / JavaScript初期化待ち
     await page.waitForTimeout(
       5000
     );
@@ -128,7 +177,10 @@ async function main() {
     }
 
 
-    // 各監視日を確認
+    // ------------------------------------------------------
+    // 各監視日をチェック
+    // ------------------------------------------------------
+
     for (
       const targetDate
       of CONFIG.TARGET_DATES
@@ -169,9 +221,9 @@ async function main() {
         state[targetDate];
 
 
-      // --------------------------------------
+      // ----------------------------------------------------
       // 非営業日は通知しない
-      // --------------------------------------
+      // ----------------------------------------------------
 
       if (
         day.open_status !==
@@ -191,19 +243,20 @@ async function main() {
       }
 
 
-      // --------------------------------------
-      // 現状確認済み：
+      // ----------------------------------------------------
+      // 現状確認済み
       //
       // sale_status = 2
       // → 空きなし
       //
-      // 2以外
+      // sale_status != 2
       // → 空き発生の可能性
-      // --------------------------------------
+      // ----------------------------------------------------
 
       const potentialAvailability =
         day.sale_status !==
         CONFIG.KNOWN_SOLD_OUT_STATUS;
+
 
       const previousSaleStatus =
         previous
@@ -216,13 +269,13 @@ async function main() {
         day.sale_status;
 
 
-      // --------------------------------------
-      // 通知
+      // ----------------------------------------------------
+      // 通知条件
       //
       // ・営業日
       // ・sale_status != 2
-      // ・前回から状態が変化
-      // --------------------------------------
+      // ・前回からsale_statusが変化
+      // ----------------------------------------------------
 
       if (
         potentialAvailability &&
@@ -274,7 +327,10 @@ ${CONFIG.CALENDAR_URL}`;
       }
 
 
+      // ----------------------------------------------------
       // 現在状態を保存
+      // ----------------------------------------------------
+
       state[targetDate] =
         currentState;
     }
@@ -500,6 +556,210 @@ function getTargetMonths() {
 
 
 // ========================================================
+// 最終監視日取得
+// ========================================================
+
+function getLatestTargetDate() {
+
+  if (
+    !Array.isArray(CONFIG.TARGET_DATES) ||
+    CONFIG.TARGET_DATES.length === 0
+  ) {
+
+    throw new Error(
+      'TARGET_DATES is empty'
+    );
+  }
+
+
+  return CONFIG.TARGET_DATES
+    .slice()
+    .sort()
+    .at(-1);
+}
+
+
+// ========================================================
+// 日本時間の今日の日付取得
+//
+// 例:
+// 2026-09-23
+// ========================================================
+
+function getTodayJst() {
+
+  const formatter =
+    new Intl.DateTimeFormat(
+      'en-CA',
+      {
+        timeZone:
+          CONFIG.TIMEZONE,
+
+        year:
+          'numeric',
+
+        month:
+          '2-digit',
+
+        day:
+          '2-digit'
+      }
+    );
+
+
+  const parts =
+    formatter.formatToParts(
+      new Date()
+    );
+
+
+  const year =
+    parts.find(
+      p => p.type === 'year'
+    ).value;
+
+
+  const month =
+    parts.find(
+      p => p.type === 'month'
+    ).value;
+
+
+  const day =
+    parts.find(
+      p => p.type === 'day'
+    ).value;
+
+
+  return `${year}-${month}-${day}`;
+}
+
+
+// ========================================================
+// 監視期間終了判定
+//
+// 今日 > 最後のTARGET_DATE
+//
+// 最終日当日は最後まで監視する。
+// 翌日になったらtrue。
+// ========================================================
+
+function isMonitoringPeriodOver() {
+
+  const today =
+    getTodayJst();
+
+
+  const latestTargetDate =
+    getLatestTargetDate();
+
+
+  console.log(
+    `Today JST: ${today}`
+  );
+
+
+  console.log(
+    `Latest target date: ${latestTargetDate}`
+  );
+
+
+  return (
+    today >
+    latestTargetDate
+  );
+}
+
+
+// ========================================================
+// Workflow自動停止
+// ========================================================
+
+async function disableWorkflow() {
+
+  const token =
+    process.env.GITHUB_TOKEN;
+
+
+  const repository =
+    process.env.GITHUB_REPOSITORY;
+
+
+  if (!token) {
+
+    throw new Error(
+      'GITHUB_TOKEN is not configured'
+    );
+  }
+
+
+  if (!repository) {
+
+    throw new Error(
+      'GITHUB_REPOSITORY is not configured'
+    );
+  }
+
+
+  const url =
+    `https://api.github.com/repos/` +
+    `${repository}/actions/workflows/` +
+    `${CONFIG.WORKFLOW_FILE}/disable`;
+
+
+  console.log(
+    `Disable workflow: ${CONFIG.WORKFLOW_FILE}`
+  );
+
+
+  const response =
+    await fetch(
+      url,
+      {
+        method:
+          'PUT',
+
+        headers: {
+
+          'Accept':
+            'application/vnd.github+json',
+
+          'Authorization':
+            `Bearer ${token}`,
+
+          'X-GitHub-Api-Version':
+            '2026-03-10',
+
+          'User-Agent':
+            'nintendo-museum-monitor'
+        }
+      }
+    );
+
+
+  if (
+    response.status !== 204
+  ) {
+
+    const text =
+      await response.text();
+
+
+    throw new Error(
+      `Workflow disable failed: ` +
+      `HTTP ${response.status} ` +
+      text.slice(0, 500)
+    );
+  }
+
+
+  console.log(
+    'Workflow disabled successfully'
+  );
+}
+
+
+// ========================================================
 // Discord
 // ========================================================
 
@@ -550,7 +810,7 @@ async function sendDiscord(
 
 
 // ========================================================
-// 状態保存
+// 状態読込
 // ========================================================
 
 function loadState() {
@@ -589,6 +849,10 @@ function loadState() {
   }
 }
 
+
+// ========================================================
+// 状態保存
+// ========================================================
 
 function saveState(state) {
 
