@@ -8,51 +8,126 @@ on:
   schedule:
     - cron: '*/5 * * * *'
 
-# state.jsonを書き戻すため必要
+
+# ==========================================================
+# 権限
+#
+# contents: write
+#   → state.jsonをcommitするため
+#
+# actions: write
+#   → TARGET_DATES終了後に
+#      このWorkflow自身をdisableするため
+# ==========================================================
+
 permissions:
   contents: write
+  actions: write
 
-# 同時に2つ走らないようにする
+
+# ==========================================================
+# 同時実行防止
+# ==========================================================
+
 concurrency:
   group: nintendo-museum-monitor
   cancel-in-progress: false
 
-jobs:
-  check:
-    runs-on: ubuntu-latest
 
-    timeout-minutes: 5
+jobs:
+
+  check:
+
+    runs-on:
+      ubuntu-latest
+
+
+    timeout-minutes:
+      5
+
 
     steps:
+
+      # ----------------------------------------------------
+      # Repository取得
+      # ----------------------------------------------------
+
       - name: Checkout
         uses: actions/checkout@v4
 
+
+      # ----------------------------------------------------
+      # Node.js
+      # ----------------------------------------------------
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
+
         with:
           node-version: 24
+
+
+      # ----------------------------------------------------
+      # npm
+      # ----------------------------------------------------
 
       - name: Install dependencies
         run: npm install
 
+
+      # ----------------------------------------------------
+      # Chromium
+      # ----------------------------------------------------
+
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+
+      # ----------------------------------------------------
+      # Nintendo Museum監視
+      #
+      # GITHUB_TOKENはGitHub Actionsが
+      # 自動発行するのでSecretへの手動登録は不要
+      # ----------------------------------------------------
+
       - name: Run monitor
+
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
         run: node monitor.js
 
+
+      # ----------------------------------------------------
+      # state.json保存
+      #
+      # Workflowが期間終了でdisableされた場合でも、
+      # このRun自体は最後まで進む。
+      # ----------------------------------------------------
+
       - name: Save monitor state
+
         run: |
+
           if git diff --quiet state.json; then
+
             echo "No state change"
+
             exit 0
+
           fi
 
+
           git config user.name "github-actions[bot]"
+
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+
           git add state.json
+
+
           git commit -m "Update monitor state"
+
+
           git push
