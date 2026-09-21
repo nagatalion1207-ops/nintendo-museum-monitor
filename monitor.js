@@ -638,10 +638,10 @@ function getTodayJst() {
 // ========================================================
 // 監視期間終了判定
 //
-// 今日 > 最後のTARGET_DATE
+// 今日 >= 最後のTARGET_DATE
 //
-// 最終日当日は最後まで監視する。
-// 翌日になったらtrue。
+// 当日券は購入できないため、
+// TARGET_DATE当日の0:00以降は監視不要。
 // ========================================================
 
 function isMonitoringPeriodOver() {
@@ -665,7 +665,7 @@ function isMonitoringPeriodOver() {
 
 
   return (
-    today >
+    today >=
     latestTargetDate
   );
 }
